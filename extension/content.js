@@ -136,8 +136,8 @@ async function getSavedProfessors() {
   return result.professors || [];
 }
 
-// Build a lookup for both supported name formats:
-// "first last" and "f. last", preserving the original casing.
+// Build a lookup for the supported name formats, preserving original casing:
+// "first last", "f. last", and "last, first".
 function buildProfessorLookup(professors) {
   const professorsByName = new Map();
 
@@ -149,7 +149,8 @@ function buildProfessorLookup(professors) {
     const professorKey = String(professor.id || `${firstName} ${lastName}:${index}`);
     const variants = [
       `${firstName} ${lastName}`,
-      `${firstName.charAt(0)}. ${lastName}`
+      `${firstName.charAt(0)}. ${lastName}`,
+      `${lastName}, ${firstName}`
     ];
 
     for (const variant of variants) {
@@ -192,13 +193,13 @@ function markTextNode(textNode, professorLookup) {
     }
   }
 
-  if (!matchedName) return false;
+  if (!matchedName) return null;
 
   // Split the text node around the matched name and wrap the match in a span
   const regex = new RegExp(`(${escapeRegex(matchedName)})`, "g");
   const parts = text.split(regex);
 
-  if (parts.length <= 1) return false;
+  if (parts.length <= 1) return null;
 
   const fragment = document.createDocumentFragment();
   let lastIndex = 0;
@@ -211,54 +212,54 @@ function markTextNode(textNode, professorLookup) {
 
       const span = document.createElement("button");
       span.type = "button";
-       span.className = MARKER_CLASS;
-       span.textContent = part;
-       // Store only the professor ID on the marker for later use.
-       if (matchedProfessors.size === 1) {
-         span.dataset.professorId = [...matchedProfessors.values()][0].id || "";
-       }
-       span.title = `Professor: ${matchedName}`;
-       span.addEventListener("click", (event) => {
-         // Prevent a marker inside an existing link/button from triggering
-         // the page's original navigation or click handler as well.
-         event.preventDefault();
-         event.stopPropagation();
-         const existingPopover = span._professorPopover?.isConnected
-           ? span._professorPopover
-           : null;
-         document.querySelectorAll(".professor-popover").forEach((popover) => {
-           if (popover !== existingPopover) popover.remove();
-         });
-         if (existingPopover) {
-           existingPopover.remove();
-           span._professorPopover = null;
-         } else {
-           const popover = createProfessorPopover(
-             [...matchedProfessors.values()],
-             (professor) => {
-               span.dataset.professorId = professor.id || "";
-             }
-           );
-           document.body.appendChild(popover);
-           positionProfessorPopover(popover, span);
-           span._professorPopover = popover;
-         }
+      span.className = MARKER_CLASS;
+      span.textContent = part;
+      // Store only the professor ID on the marker for later use.
+      if (matchedProfessors.size === 1) {
+        span.dataset.professorId = [...matchedProfessors.values()][0].id || "";
+      }
+      span.title = `Professor: ${matchedName}`;
+      span.addEventListener("click", (event) => {
+        // Prevent a marker inside an existing link/button from triggering
+        // the page's original navigation or click handler as well.
+        event.preventDefault();
+        event.stopPropagation();
+        const existingPopover = span._professorPopover?.isConnected
+          ? span._professorPopover
+          : null;
+        document.querySelectorAll(".professor-popover").forEach((popover) => {
+          if (popover !== existingPopover) popover.remove();
+        });
+        if (existingPopover) {
+          existingPopover.remove();
+          span._professorPopover = null;
+        } else {
+          const popover = createProfessorPopover(
+            [...matchedProfessors.values()],
+            (professor) => {
+              span.dataset.professorId = professor.id || "";
+            }
+          );
+          document.body.appendChild(popover);
+          positionProfessorPopover(popover, span);
+          span._professorPopover = popover;
+        }
       });
       matchGroup.appendChild(span);
 
       // Display the rating underneath the marker without storing it in the DOM.
-       if (matchedProfessors.size === 1) {
-         const matchedProfessor = [...matchedProfessors.values()][0];
-         const ratingTag = document.createElement("span");
-         ratingTag.className = "professor-rating-tag";
-         ratingTag.textContent = `★ ${matchedProfessor.avgRating}`;
-         matchGroup.appendChild(ratingTag);
-       } else if (matchedProfessors.size > 1) {
-         const ratingTag = document.createElement("span");
-         ratingTag.className = "professor-rating-tag";
-         ratingTag.textContent = "Multiple matches";
-         matchGroup.appendChild(ratingTag);
-       }
+      if (matchedProfessors.size === 1) {
+        const matchedProfessor = [...matchedProfessors.values()][0];
+        const ratingTag = document.createElement("span");
+        ratingTag.className = "professor-rating-tag";
+        ratingTag.textContent = `★ ${matchedProfessor.avgRating}`;
+        matchGroup.appendChild(ratingTag);
+      } else if (matchedProfessors.size > 1) {
+        const ratingTag = document.createElement("span");
+        ratingTag.className = "professor-rating-tag";
+        ratingTag.textContent = "Multiple matches";
+        matchGroup.appendChild(ratingTag);
+      }
 
       fragment.appendChild(matchGroup);
     } else {
@@ -267,7 +268,7 @@ function markTextNode(textNode, professorLookup) {
   }
 
   textNode.parentNode.replaceChild(fragment, textNode);
-  return true;
+  return matchedName;
 }
 
 // Escape special regex characters
@@ -422,15 +423,23 @@ function markProfessorsOnPage(professorLookup) {
     }
   );
 
-  let markedCount = 0;
+  // Collect nodes before replacing any of them. Mutating the DOM while a
+  // TreeWalker is traversing it can detach its current node and stop walking.
+  const textNodes = [];
   let node;
   while ((node = walker.nextNode())) {
-    if (markTextNode(node, professorLookup)) {
-      markedCount++;
+    textNodes.push(node);
+  }
+
+  const matchedNames = [];
+  for (const textNode of textNodes) {
+    const matchedName = markTextNode(textNode, professorLookup);
+    if (matchedName) {
+      matchedNames.push(matchedName);
     }
   }
 
-  return markedCount;
+  return matchedNames;
 }
 
 // Main entry point: scan page for professors
@@ -444,9 +453,9 @@ async function scanPageForProfessors() {
 
     // First filter the full professor list using visible body text.
     const professorLookup = buildProfessorLookup(professors);
-    const bodyText = document.body.innerText || "";
+    const bodyText = document.body.textContent || "";
     const comparableBodyText = bodyText.trim();
-    console.log("Professor Match page innerText:", comparableBodyText);
+    console.log("Professor Match page textContent:", comparableBodyText);
     const potentialMatches = new Map(
       [...professorLookup].filter(([name]) => comparableBodyText.includes(name))
     );
@@ -454,7 +463,12 @@ async function scanPageForProfessors() {
     if (potentialMatches.size === 0) return; // No potential matches on this page
 
     // Walk the DOM only with the reduced list and compare both name formats again.
-    markProfessorsOnPage(potentialMatches);
+    const matches = markProfessorsOnPage(potentialMatches);
+    console.log("Professor Match actual matches:", matches);
+
+    // Discard mutation records created by inserting our own markers so the
+    // observer does not schedule another scan for each marker we added.
+    pageObserver.takeRecords();
   } catch (error) {
     console.error("Professor Match content script error:", error);
   } finally {
