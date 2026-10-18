@@ -36,9 +36,9 @@ markerStyle.textContent = `
     white-space: nowrap;
   }
   .professor-popover {
-    position: absolute;
+    position: fixed;
     left: 0;
-    bottom: calc(100% + 8px);
+    top: 0;
     z-index: 2147483647;
     min-width: 260px;
     max-width: 320px;
@@ -49,6 +49,8 @@ markerStyle.textContent = `
     border: 1px solid #ead9a0;
     border-radius: 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
     font: 13px/1.4 Arial, sans-serif;
     text-align: left;
   }
@@ -135,15 +137,15 @@ async function getSavedProfessors() {
 }
 
 // Build a lookup for both supported name formats:
-// "first last" and "f. last", all normalized to lowercase.
+// "first last" and "f. last", preserving the original casing.
 function buildProfessorLookup(professors) {
   const professorsByName = new Map();
 
   professors.forEach((professor, index) => {
     if (!professor.firstName || !professor.lastName) return;
 
-    const firstName = professor.firstName.trim().toLowerCase();
-    const lastName = professor.lastName.trim().toLowerCase();
+    const firstName = professor.firstName.trim();
+    const lastName = professor.lastName.trim();
     const professorKey = String(professor.id || `${firstName} ${lastName}:${index}`);
     const variants = [
       `${firstName} ${lastName}`,
@@ -176,13 +178,13 @@ function isAlreadyMarked(node) {
 // Mark a single text node containing a professor name
 function markTextNode(textNode, professorLookup) {
   const text = textNode.textContent;
-  const lowerText = text.trim().toLowerCase();
+  const comparableText = text.trim();
 
   // Find which professor name(s) appear in this text node
   let matchedName = null;
   let matchedProfessors = new Map();
   for (const [name, professorsById] of professorLookup) {
-    if (lowerText.includes(name)) {
+    if (comparableText.includes(name)) {
       if (!matchedName || name.length > matchedName.length) {
         matchedName = name;
         matchedProfessors = professorsById;
@@ -193,7 +195,7 @@ function markTextNode(textNode, professorLookup) {
   if (!matchedName) return false;
 
   // Split the text node around the matched name and wrap the match in a span
-  const regex = new RegExp(`(${escapeRegex(matchedName)})`, "gi");
+  const regex = new RegExp(`(${escapeRegex(matchedName)})`, "g");
   const parts = text.split(regex);
 
   if (parts.length <= 1) return false;
@@ -203,7 +205,7 @@ function markTextNode(textNode, professorLookup) {
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
-    if (part.toLowerCase() === matchedName.toLowerCase()) {
+    if (part === matchedName) {
       const matchGroup = document.createElement("span");
       matchGroup.className = "professor-match-group";
 
@@ -217,20 +219,29 @@ function markTextNode(textNode, professorLookup) {
        }
        span.title = `Professor: ${matchedName}`;
        span.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const existingPopover = matchGroup.querySelector(".professor-popover");
-        document.querySelectorAll(".professor-popover").forEach((popover) => {
-          if (popover !== existingPopover) popover.remove();
-        });
+         // Prevent a marker inside an existing link/button from triggering
+         // the page's original navigation or click handler as well.
+         event.preventDefault();
+         event.stopPropagation();
+         const existingPopover = span._professorPopover?.isConnected
+           ? span._professorPopover
+           : null;
+         document.querySelectorAll(".professor-popover").forEach((popover) => {
+           if (popover !== existingPopover) popover.remove();
+         });
          if (existingPopover) {
            existingPopover.remove();
+           span._professorPopover = null;
          } else {
-           matchGroup.appendChild(createProfessorPopover(
+           const popover = createProfessorPopover(
              [...matchedProfessors.values()],
              (professor) => {
                span.dataset.professorId = professor.id || "";
              }
-           ));
+           );
+           document.body.appendChild(popover);
+           positionProfessorPopover(popover, span);
+           span._professorPopover = popover;
          }
       });
       matchGroup.appendChild(span);
@@ -357,6 +368,35 @@ function createProfessorPopover(professors, onSelect) {
   return popover;
 }
 
+// Position the popover inside the viewport, preferring above the marker and
+// falling below it when there is not enough room above.
+function positionProfessorPopover(popover, marker) {
+  const padding = 8;
+  const gap = 8;
+  const markerRect = marker.getBoundingClientRect();
+
+  // Measure after insertion, but keep it hidden while calculating its bounds.
+  popover.style.visibility = "hidden";
+  const popoverRect = popover.getBoundingClientRect();
+  const width = popoverRect.width;
+  const height = popoverRect.height;
+
+  let left = markerRect.left;
+  left = Math.min(left, window.innerWidth - width - padding);
+  left = Math.max(left, padding);
+
+  let top = markerRect.top - height - gap;
+  if (top < padding) {
+    top = markerRect.bottom + gap;
+  }
+  top = Math.min(top, window.innerHeight - height - padding);
+  top = Math.max(top, padding);
+
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+  popover.style.visibility = "visible";
+}
+
 // Walk the DOM tree and mark professor names
 function markProfessorsOnPage(professorLookup) {
   const walker = document.createTreeWalker(
@@ -405,10 +445,10 @@ async function scanPageForProfessors() {
     // First filter the full professor list using visible body text.
     const professorLookup = buildProfessorLookup(professors);
     const bodyText = document.body.innerText || "";
-    const lowerBodyText = bodyText.trim().toLowerCase();
-    console.log("Professor Match page innerText:", lowerBodyText);
+    const comparableBodyText = bodyText.trim();
+    console.log("Professor Match page innerText:", comparableBodyText);
     const potentialMatches = new Map(
-      [...professorLookup].filter(([name]) => lowerBodyText.includes(name))
+      [...professorLookup].filter(([name]) => comparableBodyText.includes(name))
     );
     console.log("Professor Match potential matches:", [...potentialMatches.keys()]);
     if (potentialMatches.size === 0) return; // No potential matches on this page
