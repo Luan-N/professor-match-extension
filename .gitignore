@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build and packaged extension output
+dist/
+build/
+out/
+coverage/
+.cache/
+.parcel-cache/
+*.crx
+*.zip
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp

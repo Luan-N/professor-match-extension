@@ -1,0 +1,472 @@
+// Content script: scans web pages for professor names from saved storage and marks them
+console.log("Professor Match content.js started");
+// DOM marker class added to matched professor name elements
+const MARKER_CLASS = "professor-match-marker";
+
+// Inject marker styling into the page
+const markerStyle = document.createElement("style");
+markerStyle.textContent = `
+  .${MARKER_CLASS} {
+    background-color: #fff3b0;
+    color: #8a6d1b;
+    padding: 1px 2px;
+    border-radius: 3px;
+    border-bottom: 2px solid #d4a017;
+    cursor: help;
+    border-top: 0;
+    border-left: 0;
+    border-right: 0;
+    font: inherit;
+  }
+  .professor-match-group {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    vertical-align: middle;
+  }
+  .${MARKER_CLASS}:hover {
+    background-color: #ffe082;
+  }
+  .professor-rating-tag {
+    margin-left: 0;
+    color: #8a6d1b;
+    font-size: 0.85em;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .professor-popover {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    z-index: 2147483647;
+    min-width: 260px;
+    max-width: 320px;
+    padding: 14px;
+    margin: 0;
+    background: #fff;
+    color: #222;
+    border: 1px solid #ead9a0;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    font: 13px/1.4 Arial, sans-serif;
+    text-align: left;
+  }
+  .professor-popover strong {
+    display: block;
+    color: #6b5210;
+    font-size: 15px;
+    margin-bottom: 3px;
+  }
+  .professor-popover-subtitle {
+    color: #666;
+    margin-bottom: 12px;
+  }
+  .professor-stat-box {
+    background: #fff9df;
+    border: 1px solid #f0df9c;
+    border-radius: 8px;
+    padding: 9px;
+    margin-bottom: 8px;
+  }
+  .professor-stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+    margin-bottom: 5px;
+  }
+  .professor-progress-track {
+    height: 6px;
+    overflow: hidden;
+    background: #eadfbd;
+    border-radius: 99px;
+  }
+  .professor-progress-bar {
+    height: 100%;
+    background: #d4a017;
+    border-radius: inherit;
+  }
+  .professor-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+    color: #444;
+  }
+  .professor-choice {
+    display: block;
+    width: 100%;
+    margin: 6px 0;
+    padding: 8px 10px;
+    background: #fff9df;
+    color: #222;
+    border: 1px solid #f0df9c;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+  .professor-choice:hover {
+    background: #ffe082;
+  }
+  .professor-profile-link {
+    display: block;
+    margin-top: 12px;
+    padding: 8px 10px;
+    background: #d4a017 !important;
+    color: #000 !important;
+    border-radius: 6px;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none !important;
+  }
+  .professor-profile-link:hover {
+    background: #b8860b !important;
+    color: #000 !important;
+    text-decoration: none !important;
+  }
+`;
+document.head.appendChild(markerStyle);
+
+// Retrieve saved professors from extension storage
+async function getSavedProfessors() {
+  const result = await chrome.storage.local.get(["professors", "totalProfessors"]);
+  return result.professors || [];
+}
+
+// Build a lookup for both supported name formats:
+// "first last" and "f. last", all normalized to lowercase.
+function buildProfessorLookup(professors) {
+  const professorsByName = new Map();
+
+  professors.forEach((professor, index) => {
+    if (!professor.firstName || !professor.lastName) return;
+
+    const firstName = professor.firstName.trim().toLowerCase();
+    const lastName = professor.lastName.trim().toLowerCase();
+    const professorKey = String(professor.id || `${firstName} ${lastName}:${index}`);
+    const variants = [
+      `${firstName} ${lastName}`,
+      `${firstName.charAt(0)}. ${lastName}`
+    ];
+
+    for (const variant of variants) {
+      if (!professorsByName.has(variant)) {
+        professorsByName.set(variant, new Map());
+      }
+      professorsByName.get(variant).set(professorKey, professor);
+    }
+  });
+
+  return professorsByName;
+}
+
+// Check if an element already has a professor marker ancestor (avoid double-processing)
+function isAlreadyMarked(node) {
+  let current = node.parentElement;
+  while (current) {
+    if (current.classList && current.classList.contains(MARKER_CLASS)) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
+}
+
+// Mark a single text node containing a professor name
+function markTextNode(textNode, professorLookup) {
+  const text = textNode.textContent;
+  const lowerText = text.trim().toLowerCase();
+
+  // Find which professor name(s) appear in this text node
+  let matchedName = null;
+  let matchedProfessors = new Map();
+  for (const [name, professorsById] of professorLookup) {
+    if (lowerText.includes(name)) {
+      if (!matchedName || name.length > matchedName.length) {
+        matchedName = name;
+        matchedProfessors = professorsById;
+      }
+    }
+  }
+
+  if (!matchedName) return false;
+
+  // Split the text node around the matched name and wrap the match in a span
+  const regex = new RegExp(`(${escapeRegex(matchedName)})`, "gi");
+  const parts = text.split(regex);
+
+  if (parts.length <= 1) return false;
+
+  const fragment = document.createDocumentFragment();
+  let lastIndex = 0;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.toLowerCase() === matchedName.toLowerCase()) {
+      const matchGroup = document.createElement("span");
+      matchGroup.className = "professor-match-group";
+
+      const span = document.createElement("button");
+      span.type = "button";
+       span.className = MARKER_CLASS;
+       span.textContent = part;
+       // Store only the professor ID on the marker for later use.
+       if (matchedProfessors.size === 1) {
+         span.dataset.professorId = [...matchedProfessors.values()][0].id || "";
+       }
+       span.title = `Professor: ${matchedName}`;
+       span.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const existingPopover = matchGroup.querySelector(".professor-popover");
+        document.querySelectorAll(".professor-popover").forEach((popover) => {
+          if (popover !== existingPopover) popover.remove();
+        });
+         if (existingPopover) {
+           existingPopover.remove();
+         } else {
+           matchGroup.appendChild(createProfessorPopover(
+             [...matchedProfessors.values()],
+             (professor) => {
+               span.dataset.professorId = professor.id || "";
+             }
+           ));
+         }
+      });
+      matchGroup.appendChild(span);
+
+      // Display the rating underneath the marker without storing it in the DOM.
+       if (matchedProfessors.size === 1) {
+         const matchedProfessor = [...matchedProfessors.values()][0];
+         const ratingTag = document.createElement("span");
+         ratingTag.className = "professor-rating-tag";
+         ratingTag.textContent = `★ ${matchedProfessor.avgRating}`;
+         matchGroup.appendChild(ratingTag);
+       } else if (matchedProfessors.size > 1) {
+         const ratingTag = document.createElement("span");
+         ratingTag.className = "professor-rating-tag";
+         ratingTag.textContent = "Multiple matches";
+         matchGroup.appendChild(ratingTag);
+       }
+
+      fragment.appendChild(matchGroup);
+    } else {
+      fragment.appendChild(document.createTextNode(part));
+    }
+  }
+
+  textNode.parentNode.replaceChild(fragment, textNode);
+  return true;
+}
+
+// Escape special regex characters
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    '"': "&quot;"
+  }[character]));
+}
+
+function getProgressWidth(value, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, (number / max) * 100));
+}
+
+// Build the details panel shown after a professor is selected.
+function createProfessorDetailsPopover(professor) {
+  const popover = document.createElement("div");
+  popover.className = "professor-popover";
+  popover.setAttribute("role", "dialog");
+  const ratingWidth = getProgressWidth(professor.avgRating, 5);
+  const difficultyWidth = getProgressWidth(professor.avgDifficulty, 5);
+  const rating = professor.avgRating ?? "N/A";
+  const difficulty = professor.avgDifficulty ?? "N/A";
+
+  popover.innerHTML = `
+    <strong>${escapeHtml(professor.firstName || "")} ${escapeHtml(professor.lastName || "")}</strong>
+    <div class="professor-popover-subtitle">${escapeHtml(professor.department || "Department unavailable")}</div>
+    <div class="professor-stat-box">
+      <div class="professor-stat-row"><span>Rating</span><span>${escapeHtml(rating)}</span></div>
+      <div class="professor-progress-track"><div class="professor-progress-bar" style="width: ${ratingWidth}%"></div></div>
+    </div>
+    <div class="professor-stat-box">
+      <div class="professor-stat-row"><span>Difficulty</span><span>${escapeHtml(difficulty)}</span></div>
+      <div class="professor-progress-track"><div class="professor-progress-bar" style="width: ${difficultyWidth}%"></div></div>
+    </div>
+    <div class="professor-detail-row"><span>Ratings</span><strong>${escapeHtml(professor.numRatings ?? "N/A")}</strong></div>
+    <div class="professor-detail-row"><span>Would take again</span><strong>${escapeHtml(professor.wouldTakeAgainPercent ?? "N/A")}%</strong></div>
+  `;
+
+  if (professor.legacyId) {
+    const profileLink = document.createElement("a");
+    profileLink.className = "professor-profile-link";
+    profileLink.href = `https://www.ratemyprofessors.com/professor/${encodeURIComponent(professor.legacyId)}`;
+    profileLink.target = "_blank";
+    profileLink.rel = "noopener noreferrer";
+    profileLink.textContent = "View Full Profile";
+    popover.appendChild(profileLink);
+  }
+
+  return popover;
+}
+
+// Show a chooser when the same visible name can refer to multiple professors.
+function createProfessorPopover(professors, onSelect) {
+  if (professors.length === 1) {
+    onSelect?.(professors[0]);
+    return createProfessorDetailsPopover(professors[0]);
+  }
+
+  const popover = document.createElement("div");
+  popover.className = "professor-popover";
+  popover.setAttribute("role", "dialog");
+
+  const heading = document.createElement("strong");
+  heading.textContent = "Select professor";
+  popover.appendChild(heading);
+
+  const subtitle = document.createElement("div");
+  subtitle.className = "professor-popover-subtitle";
+  subtitle.textContent = "Multiple professors match this name.";
+  popover.appendChild(subtitle);
+
+  for (const professor of professors) {
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "professor-choice";
+    choice.textContent = [
+      `${professor.firstName || ""} ${professor.lastName || ""}`.trim(),
+      professor.department || "Department unavailable"
+    ].join(" - ");
+    choice.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onSelect?.(professor);
+      popover.replaceWith(createProfessorDetailsPopover(professor));
+    });
+    popover.appendChild(choice);
+  }
+
+  return popover;
+}
+
+// Walk the DOM tree and mark professor names
+function markProfessorsOnPage(professorLookup) {
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        // Skip empty text, script/style tags, and already-marked elements
+        if (!node.textContent || !node.textContent.trim()) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (node.parentElement && (node.parentElement.tagName === "SCRIPT" || node.parentElement.tagName === "STYLE")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (node.parentElement?.closest(".professor-popover")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (isAlreadyMarked(node)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
+  );
+
+  let markedCount = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    if (markTextNode(node, professorLookup)) {
+      markedCount++;
+    }
+  }
+
+  return markedCount;
+}
+
+// Main entry point: scan page for professors
+async function scanPageForProfessors() {
+  if (isScanning) return;
+  isScanning = true;
+
+  try {
+    const professors = await getSavedProfessors();
+    if (!professors || professors.length === 0) return // No professors saved
+
+    // First filter the full professor list using visible body text.
+    const professorLookup = buildProfessorLookup(professors);
+    const bodyText = document.body.innerText || "";
+    const lowerBodyText = bodyText.trim().toLowerCase();
+    console.log("Professor Match page innerText:", lowerBodyText);
+    const potentialMatches = new Map(
+      [...professorLookup].filter(([name]) => lowerBodyText.includes(name))
+    );
+    console.log("Professor Match potential matches:", [...potentialMatches.keys()]);
+    if (potentialMatches.size === 0) return; // No potential matches on this page
+
+    // Walk the DOM only with the reduced list and compare both name formats again.
+    markProfessorsOnPage(potentialMatches);
+  } catch (error) {
+    console.error("Professor Match content script error:", error);
+  } finally {
+    isScanning = false;
+  }
+}
+
+let isScanning = false;
+let scanTimer = null;
+
+// Close any open professor popover when the user clicks elsewhere on the page.
+document.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  if (
+    event.target.closest(`.${MARKER_CLASS}`) ||
+    event.target.closest(".professor-popover")
+  ) {
+    return;
+  }
+
+  document.querySelectorAll(".professor-popover").forEach((popover) => {
+    popover.remove();
+  });
+});
+
+// Debounce scans so several DOM updates from one page render cause only one scan.
+function scheduleScan() {
+  if (scanTimer !== null) window.clearTimeout(scanTimer);
+  scanTimer = window.setTimeout(() => {
+    scanTimer = null;
+    scanPageForProfessors();
+  }, 250);
+}
+
+// Pages such as course schedules often render their content after document_idle.
+// Observe later DOM changes so dynamically inserted professor names are scanned too.
+const pageObserver = new MutationObserver((mutations) => {
+  if (isScanning) return;
+
+  const pageChanged = mutations.some((mutation) =>
+    mutation.type === "childList" || mutation.type === "characterData"
+  );
+
+  if (pageChanged) scheduleScan();
+});
+
+pageObserver.observe(document.body, {
+  subtree: true,
+  childList: true,
+  characterData: true
+});
+
+// Run once immediately and again shortly after initial page rendering.
+scanPageForProfessors();
+scheduleScan();

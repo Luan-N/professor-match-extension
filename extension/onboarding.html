@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Professor Match Setup</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <main>
+    <h1>Welcome to Professor Match</h1>
+    <p>Select your school to get started. You can change this selection later.</p>
+
+    <label for="schoolName">School</label>
+    <input id="schoolName" type="search" placeholder="Start typing your school" autocomplete="off">
+    <p id="searchStatus" role="status" aria-live="polite"></p>
+    <ul id="schoolResults" aria-label="School search results"></ul>
+
+    <button id="continueButton" type="button" disabled>Continue</button>
+  </main>
+
+  <script src="onboarding.js"></script>
+</body>
+
+</html>

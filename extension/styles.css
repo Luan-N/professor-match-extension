@@ -1,0 +1,56 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  min-width: 320px;
+  color: #202124;
+}
+
+main {
+  margin: 2rem auto;
+  max-width: 36rem;
+  padding: 0 1rem;
+}
+
+label,
+input,
+button {
+  display: block;
+}
+
+input {
+  box-sizing: border-box;
+  margin: 0.5rem 0;
+  padding: 0.6rem;
+  width: 100%;
+}
+
+#searchStatus {
+  min-height: 1.25rem;
+}
+
+#schoolResults {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#schoolResults li {
+  margin: 0.25rem 0;
+}
+
+.school-result,
+#continueButton {
+  cursor: pointer;
+  padding: 0.6rem 0.8rem;
+}
+
+.school-result {
+  background: white;
+  border: 1px solid #dadce0;
+  text-align: left;
+  width: 100%;
+}
+
+#continueButton {
+  margin-top: 1rem;
+}
