@@ -1,0 +1,136 @@
+.professor-match-marker {
+  background-color: #fff3b0;
+  color: #8a6d1b;
+  padding: 1px 2px;
+  border-radius: 3px;
+  border-bottom: 2px solid #d4a017;
+  cursor: help;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  font: inherit;
+}
+
+.professor-match-group {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  vertical-align: middle;
+}
+
+.professor-match-marker:hover {
+  background-color: #ffe082;
+}
+
+.professor-rating-tag {
+  margin-left: 0;
+  color: #8a6d1b;
+  font-size: 0.85em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.professor-popover {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2147483647;
+  min-width: 260px;
+  max-width: 320px;
+  padding: 14px;
+  margin: 0;
+  background: #fff;
+  color: #222;
+  border: 1px solid #ead9a0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  font: 13px/1.4 Arial, sans-serif;
+  text-align: left;
+}
+
+.professor-popover strong {
+  display: block;
+  color: #6b5210;
+  font-size: 15px;
+  margin-bottom: 3px;
+}
+
+.professor-popover-subtitle {
+  color: #666;
+  margin-bottom: 12px;
+}
+
+.professor-stat-box {
+  background: #fff9df;
+  border: 1px solid #f0df9c;
+  border-radius: 8px;
+  padding: 9px;
+  margin-bottom: 8px;
+}
+
+.professor-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.professor-progress-track {
+  height: 6px;
+  overflow: hidden;
+  background: #eadfbd;
+  border-radius: 99px;
+}
+
+.professor-progress-bar {
+  height: 100%;
+  background: #d4a017;
+  border-radius: inherit;
+}
+
+.professor-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  color: #444;
+}
+
+.professor-choice {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: #fff9df;
+  color: #222;
+  border: 1px solid #f0df9c;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.professor-choice:hover {
+  background: #ffe082;
+}
+
+.professor-profile-link {
+  display: block;
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: #d4a017 !important;
+  color: #000 !important;
+  border-radius: 6px;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none !important;
+}
+
+.professor-profile-link:hover {
+  background: #b8860b !important;
+  color: #000 !important;
+  text-decoration: none !important;
+}

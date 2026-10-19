@@ -3,143 +3,17 @@ console.log("Professor Match content.js started");
 // DOM marker class added to matched professor name elements
 const MARKER_CLASS = "professor-match-marker";
 
-// Inject marker styling into the page
-const markerStyle = document.createElement("style");
-markerStyle.textContent = `
-  .${MARKER_CLASS} {
-    background-color: #fff3b0;
-    color: #8a6d1b;
-    padding: 1px 2px;
-    border-radius: 3px;
-    border-bottom: 2px solid #d4a017;
-    cursor: help;
-    border-top: 0;
-    border-left: 0;
-    border-right: 0;
-    font: inherit;
-  }
-  .professor-match-group {
-    position: relative;
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    vertical-align: middle;
-  }
-  .${MARKER_CLASS}:hover {
-    background-color: #ffe082;
-  }
-  .professor-rating-tag {
-    margin-left: 0;
-    color: #8a6d1b;
-    font-size: 0.85em;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .professor-popover {
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 2147483647;
-    min-width: 260px;
-    max-width: 320px;
-    padding: 14px;
-    margin: 0;
-    background: #fff;
-    color: #222;
-    border: 1px solid #ead9a0;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-    max-height: calc(100vh - 16px);
-    overflow-y: auto;
-    font: 13px/1.4 Arial, sans-serif;
-    text-align: left;
-  }
-  .professor-popover strong {
-    display: block;
-    color: #6b5210;
-    font-size: 15px;
-    margin-bottom: 3px;
-  }
-  .professor-popover-subtitle {
-    color: #666;
-    margin-bottom: 12px;
-  }
-  .professor-stat-box {
-    background: #fff9df;
-    border: 1px solid #f0df9c;
-    border-radius: 8px;
-    padding: 9px;
-    margin-bottom: 8px;
-  }
-  .professor-stat-row {
-    display: flex;
-    justify-content: space-between;
-    font-weight: 600;
-    margin-bottom: 5px;
-  }
-  .professor-progress-track {
-    height: 6px;
-    overflow: hidden;
-    background: #eadfbd;
-    border-radius: 99px;
-  }
-  .professor-progress-bar {
-    height: 100%;
-    background: #d4a017;
-    border-radius: inherit;
-  }
-  .professor-detail-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 3px 0;
-    color: #444;
-  }
-  .professor-choice {
-    display: block;
-    width: 100%;
-    margin: 6px 0;
-    padding: 8px 10px;
-    background: #fff9df;
-    color: #222;
-    border: 1px solid #f0df9c;
-    border-radius: 6px;
-    cursor: pointer;
-    font: inherit;
-    text-align: left;
-  }
-  .professor-choice:hover {
-    background: #ffe082;
-  }
-  .professor-profile-link {
-    display: block;
-    margin-top: 12px;
-    padding: 8px 10px;
-    background: #d4a017 !important;
-    color: #000 !important;
-    border-radius: 6px;
-    font-weight: 600;
-    text-align: center;
-    text-decoration: none !important;
-  }
-  .professor-profile-link:hover {
-    background: #b8860b !important;
-    color: #000 !important;
-    text-decoration: none !important;
-  }
-`;
-document.head.appendChild(markerStyle);
-
 // Retrieve saved professors from extension storage
 async function getSavedProfessors() {
-  const result = await chrome.storage.local.get(["professors", "totalProfessors"]);
+  const result = await chrome.storage.local.get("professors");
   return result.professors || [];
 }
 
-// Build a lookup for the supported name formats, preserving original casing:
-// "first last", "f. last", and "last, first".
-function buildProfessorLookup(professors) {
-  const professorsByName = new Map();
+// Build one matcher per unique name pattern and keep all professor IDs that
+// share that pattern. The single pattern supports forward/reverse order and
+// full-name/initial formats.
+function buildProfessorMatchers(professors) {
+  const matchersByPattern = new Map();
 
   professors.forEach((professor, index) => {
     if (!professor.firstName || !professor.lastName) return;
@@ -147,48 +21,49 @@ function buildProfessorLookup(professors) {
     const firstName = professor.firstName.trim();
     const lastName = professor.lastName.trim();
     const professorKey = String(professor.id || `${firstName} ${lastName}:${index}`);
-    const variants = [
-      `${firstName} ${lastName}`,
-      `${firstName.charAt(0)}. ${lastName}`,
-      `${lastName}, ${firstName}`
-    ];
+    const pattern = getNamePattern(firstName, lastName);
+    const patternKey = pattern.source;
 
-    for (const variant of variants) {
-      if (!professorsByName.has(variant)) {
-        professorsByName.set(variant, new Map());
-      }
-      professorsByName.get(variant).set(professorKey, professor);
+    if (!matchersByPattern.has(patternKey)) {
+      matchersByPattern.set(patternKey, {
+        name: `${firstName} ${lastName}`,
+        pattern,
+        professorsById: new Map()
+      });
     }
+
+    matchersByPattern.get(patternKey).professorsById.set(professorKey, professor);
   });
 
-  return professorsByName;
+  return [...matchersByPattern.values()];
 }
 
 // Check if an element already has a professor marker ancestor (avoid double-processing)
 function isAlreadyMarked(node) {
-  let current = node.parentElement;
-  while (current) {
-    if (current.classList && current.classList.contains(MARKER_CLASS)) {
-      return true;
-    }
-    current = current.parentElement;
-  }
-  return false;
+  return Boolean(node.parentElement?.closest(`.${MARKER_CLASS}`));
 }
 
 // Mark a single text node containing a professor name
-function markTextNode(textNode, professorLookup) {
+function markTextNode(textNode, professorMatchers) {
   const text = textNode.textContent;
-  const comparableText = text.trim();
 
   // Find which professor name(s) appear in this text node
   let matchedName = null;
+  let matchedText = null;
   let matchedProfessors = new Map();
-  for (const [name, professorsById] of professorLookup) {
-    if (comparableText.includes(name)) {
-      if (!matchedName || name.length > matchedName.length) {
-        matchedName = name;
-        matchedProfessors = professorsById;
+  for (const matcher of professorMatchers) {
+    const match = matcher.pattern.exec(text);
+    if (match) {
+      if (!matchedText || match[0].length > matchedText.length) {
+        matchedName = matcher.name;
+        matchedText = match[0];
+        matchedProfessors = new Map(matcher.professorsById);
+      } else if (match[0] === matchedText) {
+        // Multiple professor patterns can match the same text, such as
+        // "F. Butt" for both Fain Butt and Frank Butt.
+        for (const [professorId, professor] of matcher.professorsById) {
+          matchedProfessors.set(professorId, professor);
+        }
       }
     }
   }
@@ -196,65 +71,64 @@ function markTextNode(textNode, professorLookup) {
   if (!matchedName) return null;
 
   // Split the text node around the matched name and wrap the match in a span
-  const regex = new RegExp(`(${escapeRegex(matchedName)})`, "g");
+  const regex = new RegExp(`(${escapeRegex(matchedText)})`, "g");
   const parts = text.split(regex);
 
   if (parts.length <= 1) return null;
 
   const fragment = document.createDocumentFragment();
-  let lastIndex = 0;
+  const matchedProfessorList = [...matchedProfessors.values()];
 
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (part === matchedName) {
+  for (const part of parts) {
+    if (part === matchedText) {
       const matchGroup = document.createElement("span");
       matchGroup.className = "professor-match-group";
 
-      const span = document.createElement("button");
-      span.type = "button";
-      span.className = MARKER_CLASS;
-      span.textContent = part;
+       const markerButton = document.createElement("button");
+       markerButton.type = "button";
+       markerButton.className = MARKER_CLASS;
+       markerButton.textContent = part;
       // Store only the professor ID on the marker for later use.
-      if (matchedProfessors.size === 1) {
-        span.dataset.professorId = [...matchedProfessors.values()][0].id || "";
-      }
-      span.title = `Professor: ${matchedName}`;
-      span.addEventListener("click", (event) => {
+       if (matchedProfessorList.length === 1) {
+          markerButton.dataset.professorId = matchedProfessorList[0].id || "";
+       }
+       markerButton.title = `Professor: ${matchedText}`;
+       markerButton.addEventListener("click", (event) => {
         // Prevent a marker inside an existing link/button from triggering
         // the page's original navigation or click handler as well.
         event.preventDefault();
         event.stopPropagation();
-        const existingPopover = span._professorPopover?.isConnected
-          ? span._professorPopover
+         const existingPopover = markerButton._professorPopover?.isConnected
+           ? markerButton._professorPopover
           : null;
         document.querySelectorAll(".professor-popover").forEach((popover) => {
           if (popover !== existingPopover) popover.remove();
         });
         if (existingPopover) {
           existingPopover.remove();
-          span._professorPopover = null;
+           markerButton._professorPopover = null;
         } else {
-          const popover = createProfessorPopover(
-            [...matchedProfessors.values()],
+           const popover = createProfessorPopover(
+             matchedProfessorList,
             (professor) => {
-              span.dataset.professorId = professor.id || "";
+               markerButton.dataset.professorId = professor.id || "";
             }
           );
           document.body.appendChild(popover);
-          positionProfessorPopover(popover, span);
-          span._professorPopover = popover;
+           positionProfessorPopover(popover, markerButton);
+           markerButton._professorPopover = popover;
         }
       });
-      matchGroup.appendChild(span);
+       matchGroup.appendChild(markerButton);
 
       // Display the rating underneath the marker without storing it in the DOM.
-      if (matchedProfessors.size === 1) {
-        const matchedProfessor = [...matchedProfessors.values()][0];
+       if (matchedProfessorList.length === 1) {
+         const matchedProfessor = matchedProfessorList[0];
         const ratingTag = document.createElement("span");
         ratingTag.className = "professor-rating-tag";
         ratingTag.textContent = `★ ${matchedProfessor.avgRating}`;
         matchGroup.appendChild(ratingTag);
-      } else if (matchedProfessors.size > 1) {
+       } else if (matchedProfessorList.length > 1) {
         const ratingTag = document.createElement("span");
         ratingTag.className = "professor-rating-tag";
         ratingTag.textContent = "Multiple matches";
@@ -274,6 +148,22 @@ function markTextNode(textNode, professorLookup) {
 // Escape special regex characters
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Create one case-sensitive pattern for a professor. It supports forward and
+// reverse order, full names and initials, with a bounded middle-text wildcard.
+function getNamePattern(firstName, lastName) {
+  // Require the period for an initial so a normal word like "This" cannot
+  // be treated as the initial "T".
+  const firstOrInitial = `(?:${escapeRegex(firstName)}|${escapeRegex(firstName.charAt(0))}\\.)`;
+  // Allow any characters between the first/initial and last name, but cap the
+  // search distance so one match cannot span an entire paragraph.
+  const middleTokens = "[\\s\\S]{0,20}?";
+  const forward = `${firstOrInitial}${middleTokens}\\s+${escapeRegex(lastName)}`;
+  const reverse = `${escapeRegex(lastName)},?\\s+${firstOrInitial}${middleTokens}`;
+  // Match the name anywhere in the text. RegExp.exec/test already searches
+  // through the whole string, so explicit .* wildcards are unnecessary.
+  return new RegExp(`(?:${forward}|${reverse})`);
 }
 
 function escapeHtml(value) {
@@ -399,7 +289,7 @@ function positionProfessorPopover(popover, marker) {
 }
 
 // Walk the DOM tree and mark professor names
-function markProfessorsOnPage(professorLookup) {
+function markProfessorsOnPage(professorMatchers) {
   const walker = document.createTreeWalker(
     document.body,
     NodeFilter.SHOW_TEXT,
@@ -409,10 +299,7 @@ function markProfessorsOnPage(professorLookup) {
         if (!node.textContent || !node.textContent.trim()) {
           return NodeFilter.FILTER_REJECT;
         }
-        if (node.parentElement && (node.parentElement.tagName === "SCRIPT" || node.parentElement.tagName === "STYLE")) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (node.parentElement?.closest(".professor-popover")) {
+        if (node.parentElement?.closest("script, style, .professor-popover")) {
           return NodeFilter.FILTER_REJECT;
         }
         if (isAlreadyMarked(node)) {
@@ -433,7 +320,7 @@ function markProfessorsOnPage(professorLookup) {
 
   const matchedNames = [];
   for (const textNode of textNodes) {
-    const matchedName = markTextNode(textNode, professorLookup);
+    const matchedName = markTextNode(textNode, professorMatchers);
     if (matchedName) {
       matchedNames.push(matchedName);
     }
@@ -449,18 +336,17 @@ async function scanPageForProfessors() {
 
   try {
     const professors = await getSavedProfessors();
-    if (!professors || professors.length === 0) return // No professors saved
+    if (!professors.length) return; // No professors saved
 
     // First filter the full professor list using visible body text.
-    const professorLookup = buildProfessorLookup(professors);
+    const professorMatchers = buildProfessorMatchers(professors);
     const bodyText = document.body.textContent || "";
     const comparableBodyText = bodyText.trim();
-    console.log("Professor Match page textContent:", comparableBodyText);
-    const potentialMatches = new Map(
-      [...professorLookup].filter(([name]) => comparableBodyText.includes(name))
+    const potentialMatches = professorMatchers.filter((matcher) =>
+      matcher.pattern.test(comparableBodyText)
     );
-    console.log("Professor Match potential matches:", [...potentialMatches.keys()]);
-    if (potentialMatches.size === 0) return; // No potential matches on this page
+    console.log("Professor Match potential matches:", potentialMatches.map(({ name }) => name));
+    if (potentialMatches.length === 0) return; // No potential matches on this page
 
     // Walk the DOM only with the reduced list and compare both name formats again.
     const matches = markProfessorsOnPage(potentialMatches);
@@ -507,11 +393,8 @@ function scheduleScan() {
 // Observe later DOM changes so dynamically inserted professor names are scanned too.
 const pageObserver = new MutationObserver((mutations) => {
   if (isScanning) return;
-
-  const pageChanged = mutations.some((mutation) =>
-    mutation.type === "childList" || mutation.type === "characterData"
-  );
-
+  
+  const pageChanged = mutations.some((mutation) => mutation.type === "childList" || mutation.type === "characterData");
   if (pageChanged) scheduleScan();
 });
 
@@ -521,6 +404,6 @@ pageObserver.observe(document.body, {
   characterData: true
 });
 
-// Run once immediately and again shortly after initial page rendering.
+// Scan the current DOM immediately. Later page changes are handled by the
+// MutationObserver above.
 scanPageForProfessors();
-scheduleScan();
