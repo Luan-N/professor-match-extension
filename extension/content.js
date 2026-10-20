@@ -9,6 +9,38 @@ async function getSavedProfessors() {
   return result.professors || [];
 }
 
+// ---------------------------------------------------------------------------
+// Add to stop the page from lagging.
+// WHAT THIS DOES: compile the matchers once, remember them here, and only
+// rebuild if the professor list in storage actually changes (for example
+// when the user picks a different school in onboarding).
+// ---------------------------------------------------------------------------
+
+// Cached result of buildProfessorMatchers(). `null` means "not built yet".
+let cachedMatchers = null;
+
+// Return the cached matchers, building them only on the first call.
+// Subsequent scans reuse the same array so no recompilation cost.
+async function getProfessorMatchers() {
+  if (cachedMatchers) return cachedMatchers;
+
+  const professors = await getSavedProfessors();
+
+  // Store an empty array (not null) if no professors are saved so we don't
+  // rebuild on every scan in the "not set up yet" state either.
+
+  cachedMatchers = professors.length ? buildProfessorMatchers(professors) : [];
+  return cachedMatchers;
+}
+
+// Clear the cache whenever the professor list changes in storage
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.professors) {
+    cachedMatchers = null;
+  }
+});
+// end for the first fix related to reg for page lag
+
 // Build one matcher per unique name pattern and keep all professor IDs that
 // share that pattern. The single pattern supports forward/reverse order and
 // full-name/initial formats.
@@ -335,11 +367,14 @@ async function scanPageForProfessors() {
   isScanning = true;
 
   try {
-    const professors = await getSavedProfessors();
-    if (!professors.length) return; // No professors saved
+    const professorMatchers = await getProfessorMatchers();
+    if (!professorMatchers.length) return; // No professors saved
+    
+    //const professors = await getSavedProfessors();
+    //if (!professors.length) return; // No professors saved
 
     // First filter the full professor list using visible body text.
-    const professorMatchers = buildProfessorMatchers(professors);
+   // const professorMatchers = buildProfessorMatchers(professors);
     const bodyText = document.body.textContent || "";
     const comparableBodyText = bodyText.trim();
     const potentialMatches = professorMatchers.filter((matcher) =>
