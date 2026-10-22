@@ -23,54 +23,6 @@ async function getSavedProfessors() {
   return result.professors || [];
 }
 
-// ---------------------------------------------------------------------------
-// Performance Optimization: Compile matchers once, remember them, and only
-// rebuild if the professor list in storage changes.
-// ---------------------------------------------------------------------------
-
-let cachedMatchers = null;
-let cachedLastNameRegex = null;
-
-// Return the cached matchers, building them only on the first call.
-async function getProfessorMatchers() {
-  if (cachedMatchers) return cachedMatchers;
-
-  const professors = await getSavedProfessors();
-  // Store an empty array if no professors are saved to avoid rebuilding repeatedly
-  cachedMatchers = professors.length ? buildProfessorMatchers(professors) : [];
-  return cachedMatchers;
-}
-
-// Build a single regex of ALL last names to quickly check if a page
-// even has a professor on it before doing 5,400 individual pattern tests.
-function getLastNamePrefilter(matchers) {
-  if (cachedLastNameRegex) return cachedLastNameRegex;
-
-  const lastNames = new Set();
-  for (const matcher of matchers) {
-    const parts = matcher.name.trim().split(/\s+/);
-    const last = parts[parts.length - 1];
-    if (last) {
-      lastNames.add(escapeRegex(last));
-    }
-  }
-
-  if (lastNames.size === 0) return null;
-
-  // Creates a mega-regex: /\b(?:Smith|Jones|Kim)\b/
-  // \b ensures "Smith" matches in "John Smith" but NOT in "Blacksmith"
-  cachedLastNameRegex = new RegExp(`\\b(?:${[...lastNames].join("|")})\\b`);
-  return cachedLastNameRegex;
-}
-
-// Clear the cache whenever the professor list changes in storage
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.professors) {
-    cachedMatchers = null;
-    cachedLastNameRegex = null;
-  }
-});
-
 // Build one matcher per unique name pattern and keep all professor IDs that
 // share that pattern.
 function buildProfessorMatchers(professors) {
@@ -226,6 +178,8 @@ function getNamePattern(firstName, lastName) {
   // Allow any characters between the first/initial and last name, but cap the
   // search distance so one match cannot span an entire paragraph.
   const middleTokens = "[\\s\\S]{0,20}?";
+  
+  // KEEPING PARTNER'S REGEX FIX HERE
   const forward = `${firstOrInitial}${middleTokens}${escapeRegex(lastName)}`;
   const reverse = `${escapeRegex(lastName)}${middleTokens}${firstOrInitial}`;
   return new RegExp(`(?:${forward}|${reverse})`);
@@ -400,19 +354,13 @@ async function scanPageForProfessors() {
   isScanning = true;
 
   try {
-    const professorMatchers = await getProfessorMatchers();
-    if (!professorMatchers.length) return; // No professors saved
+    const professors = await getSavedProfessors();
+    if (!professors || professors.length === 0) return; // No professors saved
 
+    // First filter the full professor list using visible body text.
+    const professorMatchers = buildProfessorMatchers(professors);
     const bodyText = document.body.textContent || "";
     const comparableBodyText = bodyText.trim();
-
-    // Early exit using the combined last-name regex.
-    const prefilter = getLastNamePrefilter(professorMatchers);
-    if (prefilter && !prefilter.test(comparableBodyText)) {
-      return; // Page has no professor names, exit immediately
-    }
-
-    // If we get here, the page has at least one professor's last name.
     const potentialMatches = professorMatchers.filter((matcher) =>
       matcher.pattern.test(comparableBodyText)
     );
