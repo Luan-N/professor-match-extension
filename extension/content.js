@@ -226,8 +226,8 @@ function getNamePattern(firstName, lastName) {
   // Allow any characters between the first/initial and last name, but cap the
   // search distance so one match cannot span an entire paragraph.
   const middleTokens = "[\\s\\S]{0,20}?";
-  const forward = `${firstOrInitial}${middleTokens}\\s+${escapeRegex(lastName)}`;
-  const reverse = `${escapeRegex(lastName)},?\\s+${firstOrInitial}${middleTokens}`;
+  const forward = `${firstOrInitial}${middleTokens}${escapeRegex(lastName)}`;
+  const reverse = `${escapeRegex(lastName)}${middleTokens}${firstOrInitial}`;
   return new RegExp(`(?:${forward}|${reverse})`);
 }
 
