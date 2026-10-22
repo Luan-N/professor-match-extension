@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "Personalized professor information and review analysis.",
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab"
+
   ],
   "host_permissions": [
     "https://www.ratemyprofessors.com/*"

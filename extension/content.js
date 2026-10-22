@@ -3,6 +3,20 @@ console.log("Professor Match content.js started");
 // DOM marker class added to matched professor name elements
 const MARKER_CLASS = "professor-match-marker";
 
+// Whitelist check: Only run on .edu domains or sites the user has approved
+async function isAllowedSite() {
+  const hostname = window.location.hostname.toLowerCase();
+  
+  // Always allow .edu
+  if (hostname.endsWith(".edu")) return true;
+  
+  // Check custom whitelist
+  const { allowedDomains = [] } = await chrome.storage.local.get("allowedDomains");
+  return allowedDomains.some(domain => 
+    hostname === domain || hostname.endsWith("." + domain)
+  );
+}
+
 // Retrieve saved professors from extension storage
 async function getSavedProfessors() {
   const result = await chrome.storage.local.get("professors");
@@ -10,33 +24,23 @@ async function getSavedProfessors() {
 }
 
 // ---------------------------------------------------------------------------
-// Add to stop the page from lagging.
-// WHAT THIS DOES: compile the matchers once, remember them here, and only
-// rebuild if the professor list in storage actually changes (for example
-// when the user picks a different school in onboarding).
+// Performance Optimization: Compile matchers once, remember them, and only
+// rebuild if the professor list in storage changes.
 // ---------------------------------------------------------------------------
 
-// Cached result of buildProfessorMatchers(). `null` means "not built yet".
 let cachedMatchers = null;
-
-//Prefilter cache variables to fix lag cause by regex
 let cachedLastNameRegex = null;
 
 // Return the cached matchers, building them only on the first call.
-// Subsequent scans reuse the same array so no recompilation cost.
 async function getProfessorMatchers() {
   if (cachedMatchers) return cachedMatchers;
 
   const professors = await getSavedProfessors();
-
-  // Store an empty array (not null) if no professors are saved so we don't
-  // rebuild on every scan in the "not set up yet" state either.
-
+  // Store an empty array if no professors are saved to avoid rebuilding repeatedly
   cachedMatchers = professors.length ? buildProfessorMatchers(professors) : [];
   return cachedMatchers;
 }
 
-//To improve regex so less lag 
 // Build a single regex of ALL last names to quickly check if a page
 // even has a professor on it before doing 5,400 individual pattern tests.
 function getLastNamePrefilter(matchers) {
@@ -44,7 +48,6 @@ function getLastNamePrefilter(matchers) {
 
   const lastNames = new Set();
   for (const matcher of matchers) {
-    // matcher.name is "First Last", so split and grab the last word
     const parts = matcher.name.trim().split(/\s+/);
     const last = parts[parts.length - 1];
     if (last) {
@@ -54,13 +57,8 @@ function getLastNamePrefilter(matchers) {
 
   if (lastNames.size === 0) return null;
 
-  // Join all last names
-  // Breakdown of the regex syntax:
-  // - [...lastNames]  : Converts the Set into an array.
-  // - .join("|")      : Joins them with a pipe (|), which means "OR" in regex.
-  // - (?: ... )       : Groups the names together so the OR applies to the whole list.
-  // - \\b             : Word boundaries. Ensures "Smith" matches in "John Smith"
-  //                     but does NOT match inside words like "Blacksmith".
+  // Creates a mega-regex: /\b(?:Smith|Jones|Kim)\b/
+  // \b ensures "Smith" matches in "John Smith" but NOT in "Blacksmith"
   cachedLastNameRegex = new RegExp(`\\b(?:${[...lastNames].join("|")})\\b`);
   return cachedLastNameRegex;
 }
@@ -69,14 +67,12 @@ function getLastNamePrefilter(matchers) {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.professors) {
     cachedMatchers = null;
-    cachedLastNameRegex = null; //To reset new var to fix regex
+    cachedLastNameRegex = null;
   }
 });
-// end for the first fix related to reg for page lag
 
 // Build one matcher per unique name pattern and keep all professor IDs that
-// share that pattern. The single pattern supports forward/reverse order and
-// full-name/initial formats.
+// share that pattern.
 function buildProfessorMatchers(professors) {
   const matchersByPattern = new Map();
 
@@ -149,51 +145,57 @@ function markTextNode(textNode, professorMatchers) {
       const matchGroup = document.createElement("span");
       matchGroup.className = "professor-match-group";
 
-       const markerButton = document.createElement("button");
-       markerButton.type = "button";
-       markerButton.className = MARKER_CLASS;
-       markerButton.textContent = part;
+      const markerButton = document.createElement("button");
+      markerButton.type = "button";
+      markerButton.className = MARKER_CLASS;
+      markerButton.textContent = part;
+      
       // Store only the professor ID on the marker for later use.
-       if (matchedProfessorList.length === 1) {
-          markerButton.dataset.professorId = matchedProfessorList[0].id || "";
-       }
-       markerButton.title = `Professor: ${matchedText}`;
-       markerButton.addEventListener("click", (event) => {
+      if (matchedProfessorList.length === 1) {
+        markerButton.dataset.professorId = matchedProfessorList[0].id || "";
+      }
+      
+      markerButton.title = `Professor: ${matchedText}`;
+      markerButton.addEventListener("click", (event) => {
         // Prevent a marker inside an existing link/button from triggering
         // the page's original navigation or click handler as well.
         event.preventDefault();
         event.stopPropagation();
-         const existingPopover = markerButton._professorPopover?.isConnected
-           ? markerButton._professorPopover
+        
+        const existingPopover = markerButton._professorPopover?.isConnected
+          ? markerButton._professorPopover
           : null;
+          
         document.querySelectorAll(".professor-popover").forEach((popover) => {
           if (popover !== existingPopover) popover.remove();
         });
+        
         if (existingPopover) {
           existingPopover.remove();
-           markerButton._professorPopover = null;
+          markerButton._professorPopover = null;
         } else {
-           const popover = createProfessorPopover(
-             matchedProfessorList,
+          const popover = createProfessorPopover(
+            matchedProfessorList,
             (professor) => {
-               markerButton.dataset.professorId = professor.id || "";
+              markerButton.dataset.professorId = professor.id || "";
             }
           );
           document.body.appendChild(popover);
-           positionProfessorPopover(popover, markerButton);
-           markerButton._professorPopover = popover;
+          positionProfessorPopover(popover, markerButton);
+          markerButton._professorPopover = popover;
         }
       });
-       matchGroup.appendChild(markerButton);
+      
+      matchGroup.appendChild(markerButton);
 
       // Display the rating underneath the marker without storing it in the DOM.
-       if (matchedProfessorList.length === 1) {
-         const matchedProfessor = matchedProfessorList[0];
+      if (matchedProfessorList.length === 1) {
+        const matchedProfessor = matchedProfessorList[0];
         const ratingTag = document.createElement("span");
         ratingTag.className = "professor-rating-tag";
         ratingTag.textContent = `★ ${matchedProfessor.avgRating}`;
         matchGroup.appendChild(ratingTag);
-       } else if (matchedProfessorList.length > 1) {
+      } else if (matchedProfessorList.length > 1) {
         const ratingTag = document.createElement("span");
         ratingTag.className = "professor-rating-tag";
         ratingTag.textContent = "Multiple matches";
@@ -226,8 +228,6 @@ function getNamePattern(firstName, lastName) {
   const middleTokens = "[\\s\\S]{0,20}?";
   const forward = `${firstOrInitial}${middleTokens}\\s+${escapeRegex(lastName)}`;
   const reverse = `${escapeRegex(lastName)},?\\s+${firstOrInitial}${middleTokens}`;
-  // Match the name anywhere in the text. RegExp.exec/test already searches
-  // through the whole string, so explicit .* wildcards are unnecessary.
   return new RegExp(`(?:${forward}|${reverse})`);
 }
 
@@ -402,23 +402,11 @@ async function scanPageForProfessors() {
   try {
     const professorMatchers = await getProfessorMatchers();
     if (!professorMatchers.length) return; // No professors saved
-    
-    //const professors = await getSavedProfessors();
-    //if (!professors.length) return; // No professors saved
 
-    // First filter the full professor list using visible body text.
-    // const professorMatchers = buildProfessorMatchers(professors);
-    //const bodyText = document.body.textContent || "";
-    //const comparableBodyText = bodyText.trim();
-    //const potentialMatches = professorMatchers.filter((matcher) =>
-    //  matcher.pattern.test(comparableBodyText)
-    //);
-
-    //New fix for regex to do prefiller also didn't del old code just comment out in case of issue
     const bodyText = document.body.textContent || "";
     const comparableBodyText = bodyText.trim();
 
-    // PERFORMANCE FIX #2: Early exit using the combined last-name regex.
+    // Early exit using the combined last-name regex.
     const prefilter = getLastNamePrefilter(professorMatchers);
     if (prefilter && !prefilter.test(comparableBodyText)) {
       return; // Page has no professor names, exit immediately
@@ -482,12 +470,24 @@ const pageObserver = new MutationObserver((mutations) => {
   if (pageChanged) scheduleScan();
 });
 
-pageObserver.observe(document.body, {
-  subtree: true,
-  childList: true,
-  characterData: true
-});
+// Start extension only if the current site is .edu or whitelisted
+async function startExtension() {
+  const allowed = await isAllowedSite();
+  if (!allowed) {
+    return; // Exit immediately if site is not allowed
+  }
 
-// Scan the current DOM immediately. Later page changes are handled by the
-// MutationObserver above.
-scanPageForProfessors();
+  console.log("Professor Match started on allowed site:", window.location.hostname);
+
+  pageObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true
+  });
+
+  // Scan the current DOM immediately
+  scanPageForProfessors();
+}
+
+// Call the start function
+startExtension();
