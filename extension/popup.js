@@ -140,6 +140,14 @@ allowCurrentSiteButton.addEventListener("click", async () => {
     allowCurrentSiteButton.disabled = true;
     allowCurrentSiteButton.style.backgroundColor = "#888";
     renderDomains();
+
+    // Automatically reload the page and close the popup
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.reload(tabs[0].id);
+      }
+      window.close(); // Close the popup so the user sees the page reload
+    });
   }
 });
 
