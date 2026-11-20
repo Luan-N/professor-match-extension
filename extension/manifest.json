@@ -5,8 +5,7 @@
   "description": "Personalized professor information and review analysis.",
   "permissions": [
     "storage",
-    "activeTab",
-    "alarms"
+    "activeTab"
   ],
   "host_permissions": [
     "https://www.ratemyprofessors.com/*"

@@ -1,23 +1,15 @@
 // Background service worker
 
-// --- 1. OPEN ONBOARDING ON FIRST INSTALL ---
+// Open onboarding on first install
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     chrome.tabs.create({
       url: chrome.runtime.getURL("onboarding.html")
     });
   }
-  
-  // Set up the weekly alarm (7 days = 10080 minutes)
-  chrome.alarms.create("refreshProfessorsAlarm", { periodInMinutes: 10080 });
 });
 
-// Also set up the alarm when Chrome starts up
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create("refreshProfessorsAlarm", { periodInMinutes: 10080 });
-});
-
-// --- 2. THE GRAPHQL QUERY ---
+// The GraphQL query
 const ALL_TEACHERS_QUERY = `
   query AllSchoolTeachers(
     $query: TeacherSearchQuery!
@@ -25,34 +17,19 @@ const ALL_TEACHERS_QUERY = `
     $after: String
   ) {
     newSearch {
-      teachers(
-        query: $query
-        first: $first
-        after: $after
-      ) {
+      teachers(query: $query, first: $first, after: $after) {
         edges {
           node {
-            id
-            legacyId
-            firstName
-            lastName
-            department
-            avgRating
-            avgDifficulty
-            numRatings
-            wouldTakeAgainPercent
+            id legacyId firstName lastName department 
+            avgRating avgDifficulty numRatings wouldTakeAgainPercent
           }
         }
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
 `;
 
-// --- 3. FETCH FUNCTION (Copied from onboarding.js) ---
 async function fetchAllProfessors(schoolId) {
   const allProfessors = [];
   let after = null;
@@ -83,40 +60,35 @@ async function fetchAllProfessors(schoolId) {
     if (!teachers.pageInfo.hasNextPage) break;
     after = teachers.pageInfo.endCursor;
   }
-
   return allProfessors;
 }
 
-// --- 4. THE TTL CHECK & REFRESH ---
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== "refreshProfessorsAlarm") return;
+// The startup check
+chrome.runtime.onStartup.addListener(async () => {
+  console.log("Chrome started. Checking professor data freshness...");
 
-  console.log("Checking if professor list needs a refresh...");
-
-  // Get current school and when we last loaded it
   const { schoolId, professorsLoadedAt } = await chrome.storage.local.get([
     "schoolId", "professorsLoadedAt"
   ]);
 
   if (!schoolId) return; // No school selected yet
 
-  // Calculate age (30 days in milliseconds = 30 * 24 * 60 * 60 * 1000)
+  // Calculate age (30 days in milliseconds)
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
   const isStale = !professorsLoadedAt || (Date.now() - professorsLoadedAt > THIRTY_DAYS);
 
   if (isStale) {
-    console.log("Data is stale! Fetching new list in the background...");
+    console.log("Data is older than 30 days. Fetching new list in background...");
     try {
       const allProfessors = await fetchAllProfessors(schoolId);
       
-      // Save the fresh data to storage
       await chrome.storage.local.set({
         professors: allProfessors,
         professorsLoadedAt: Date.now(),
         totalProfessors: allProfessors.length
       });
       
-      console.log(`Successfully refreshed ${allProfessors.length} professors in the background!`);
+      console.log(`Successfully refreshed ${allProfessors.length} professors on startup!`);
     } catch (error) {
       console.error("Failed to auto-refresh professors:", error);
     }
