@@ -29,6 +29,16 @@
 
       <ul id="domainList" style="padding-left: 20px; font-size: 12px; max-height: 100px; overflow-y: auto;"></ul>
     </div>
+        <!-- AI API Key -->
+    <div id="ai-settings-section" style="margin-top: 15px; border-top: 1px solid #ccc; padding-top: 10px;">
+      <h3 style="font-size: 14px; margin-bottom: 5px;">AI Settings</h3>
+      <p style="font-size: 11px; color: #666; margin-bottom: 5px;">Enter your OpenRouter API Key to enable AI features.</p>
+      
+      <input id="apiKeyInput" type="password" placeholder="sk-or-v1-..." style="width: 100%; padding: 5px; margin-bottom: 5px; box-sizing: border-box;">
+      <button id="saveApiKeyButton" style="width: 100%; padding: 5px;">Save API Key</button>
+      
+      <p id="apiKeyStatus" style="font-size: 11px; color: green; margin-top: 5px; min-height: 14px;"></p>
+    </div>
 
     <script src="popup.js"></script>
 </body>

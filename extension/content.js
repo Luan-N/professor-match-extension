@@ -224,7 +224,53 @@ function createProfessorDetailsPopover(professor) {
     </div>
     <div class="professor-detail-row"><span>Ratings</span><strong>${escapeHtml(professor.numRatings ?? "N/A")}</strong></div>
     <div class="professor-detail-row"><span>Would take again</span><strong>${escapeHtml(professor.wouldTakeAgainPercent ?? "N/A")}%</strong></div>
+    
+    <!-- AI Input Section -->
+    <div class="professor-ai-section">
+      <input type="text" class="professor-ai-input" placeholder="Ask about exams, homework, etc..." />
+      <button class="professor-ai-button">✨ Ask AI</button>
+      <div class="professor-ai-response"></div>
+    </div>
   `;
+
+  // Add the event listeners for the AI input
+  setTimeout(() => {
+    const aiBtn = popover.querySelector(".professor-ai-button");
+    const aiInput = popover.querySelector(".professor-ai-input");
+    const aiResponse = popover.querySelector(".professor-ai-response");
+
+    if (aiBtn && aiInput && aiResponse) {
+      const handleAIRequest = async () => {
+        const question = aiInput.value.trim();
+        if (!question) return;
+
+        // Set up the loading state
+        aiBtn.disabled = true;
+        aiBtn.textContent = "Analyzing...";
+        aiResponse.style.display = "block";
+        aiResponse.textContent = "🤖 Reading student reviews...";
+
+        try {
+          // Call the agent function from ai.js
+          const answer = await runAIAgent(professor, question);
+          aiResponse.textContent = answer;
+        } catch (error) {
+          aiResponse.textContent = "Error analyzing reviews. Check your API key.";
+        } finally {
+          // Reset the button when done
+          aiBtn.disabled = false;
+          aiBtn.textContent = "✨ Ask AI";
+        }
+      };
+
+      aiBtn.addEventListener("click", handleAIRequest);
+      
+      // Let the user press Enter instead of clicking the button
+      aiInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") handleAIRequest();
+      });
+    }
+  }, 10); // Slight delay to make sure the DOM is ready
 
   if (professor.legacyId) {
     const profileLink = document.createElement("a");

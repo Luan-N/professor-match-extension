@@ -10,6 +10,10 @@ const addDomainButton = document.getElementById("addDomainButton");
 const domainList = document.getElementById("domainList");
 let currentHostname = "";
 
+// AI Settings vars
+const apiKeyInput = document.getElementById("apiKeyInput");
+const saveApiKeyButton = document.getElementById("saveApiKeyButton");
+const apiKeyStatus = document.getElementById("apiKeyStatus");
 
 /**
  * Updates the current school display based on stored data
@@ -97,7 +101,45 @@ async function renderDomains() {
     li.appendChild(deleteBtn);
     domainList.appendChild(li);
   });
+} //Whitelist end
+
+// AI API Key part
+// Load the saved key when the popup opens
+async function loadApiKey() {
+  const { apiKey } = await chrome.storage.local.get("apiKey");
+  if (apiKey) {
+    apiKeyInput.value = apiKey;
+  }
 }
+
+// Save the key when the button is clicked
+saveApiKeyButton.addEventListener("click", async () => {
+  const key = apiKeyInput.value.trim();
+  
+  if (!key) {
+    apiKeyStatus.style.color = "red";
+    apiKeyStatus.textContent = "Please enter a valid API key.";
+    return;
+  }
+
+  if (!key.startsWith("sk-or-")) {
+    apiKeyStatus.style.color = "red";
+    apiKeyStatus.textContent = "Invalid format. Key must start with sk-or-";
+    return;
+  }
+
+  // Save to Chrome storage
+  await chrome.storage.local.set({ apiKey: key });
+  
+  // Show success message
+  apiKeyStatus.style.color = "green";
+  apiKeyStatus.textContent = "OpenRouter Key saved successfully!";
+  
+  // Clear the message after 3 seconds
+  setTimeout(() => {
+    apiKeyStatus.textContent = "";
+  }, 3000);
+}); // AI API Key part end
 
 async function checkCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -177,4 +219,5 @@ document.addEventListener("DOMContentLoaded", () => {
   updateCurrentSchoolDisplay();
   checkCurrentTab();
   renderDomains();
+  loadApiKey(); // For AI
 });

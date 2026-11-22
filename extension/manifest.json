@@ -23,6 +23,7 @@
         "<all_urls>"
       ],
       "js": [
+        "ai.js",
         "content.js"
       ],
       "css": [

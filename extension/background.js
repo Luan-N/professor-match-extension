@@ -9,7 +9,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// The GraphQL query
+// The GraphQL query for all professors
 const ALL_TEACHERS_QUERY = `
   query AllSchoolTeachers(
     $query: TeacherSearchQuery!
@@ -63,7 +63,7 @@ async function fetchAllProfessors(schoolId) {
   return allProfessors;
 }
 
-// The startup check
+// The startup check (TTL)
 chrome.runtime.onStartup.addListener(async () => {
   console.log("Chrome started. Checking professor data freshness...");
 
@@ -71,9 +71,8 @@ chrome.runtime.onStartup.addListener(async () => {
     "schoolId", "professorsLoadedAt"
   ]);
 
-  if (!schoolId) return; // No school selected yet
+  if (!schoolId) return;
 
-  // Calculate age (30 days in milliseconds)
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
   const isStale = !professorsLoadedAt || (Date.now() - professorsLoadedAt > THIRTY_DAYS);
 
@@ -81,18 +80,69 @@ chrome.runtime.onStartup.addListener(async () => {
     console.log("Data is older than 30 days. Fetching new list in background...");
     try {
       const allProfessors = await fetchAllProfessors(schoolId);
-      
       await chrome.storage.local.set({
         professors: allProfessors,
         professorsLoadedAt: Date.now(),
         totalProfessors: allProfessors.length
       });
-      
       console.log(`Successfully refreshed ${allProfessors.length} professors on startup!`);
     } catch (error) {
       console.error("Failed to auto-refresh professors:", error);
     }
-  } else {
-    console.log("Professor data is still fresh. No refresh needed.");
   }
 });
+
+// --- AI AGENT MESSAGE LISTENER ---
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "FETCH_RMP_REVIEWS") {
+    fetchProfessorReviewsFromBackground(request.professorId)
+      .then((reviews) => sendResponse({ success: true, reviews }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
+    
+    return true; // Keep message channel open for async response
+  }
+});
+
+const TEACHER_REVIEWS_QUERY = `
+  query TeacherRatingsQuery($id: ID!, $first: Int!) {
+    node(id: $id) {
+      ... on Teacher {
+        ratings(first: $first) {
+          edges {
+            node {
+              comment
+              class
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+async function fetchProfessorReviewsFromBackground(professorId) {
+  const response = await fetch("https://www.ratemyprofessors.com/graphql", {
+    method: "POST",
+    headers: { 
+      "Content-Type": "application/json",
+      "Authorization": "Basic dGVzdDp0ZXN0" // Required by RMP to prevent blocking
+    },
+    body: JSON.stringify({
+      operationName: "TeacherRatingsQuery",
+      query: TEACHER_REVIEWS_QUERY,
+      variables: { id: professorId, first: 20 }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`RMP returned status ${response.status}`);
+  }
+
+  const result = await response.json();
+  const reviews = result.data?.node?.ratings?.edges || [];
+  const comments = reviews
+    .map((edge) => edge.node.comment)
+    .filter((comment) => comment && comment.trim() !== "");
+
+  return comments.length > 0 ? comments : ["No written reviews available for this professor."];
+}
