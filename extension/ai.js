@@ -86,16 +86,7 @@ async function runAIAgent(professor, userQuestion) {
                   resolve(["Failed to fetch reviews from background script."]);
                 }
               }
-            ) else {
-          // If the AI hallucinates a tool, tell it the tool doesn't exist
-          messages.push(aiMessage);
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            name: toolCall.function.name,
-            content: "Error: Tool does not exist. You can only use fetch_professor_reviews."
-          });
-        };
+            ) 
           });
 
           // Add the AI's request and the tool's response to history
